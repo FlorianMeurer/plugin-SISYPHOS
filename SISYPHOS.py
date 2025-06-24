@@ -97,6 +97,7 @@ class FAPJob:                                   # one FAPjob manages the refinem
       """ Runs the refinement using predefined settings
       """
       try:
+        print("Refining...")
         olex.m(f"reap {self.final_ins_path}")
         self.log_sth(f"Was able to load .ins: {self.final_ins_path}")
         self.log_sth("=========================== Starting New Refinment ===========================")
@@ -134,7 +135,12 @@ class FAPJob:                                   # one FAPjob manages the refinem
         exti = olx.xf.rm.Exti()
         self.log_sth(f"Found Extinction: {exti}")
         if exti != "n/a":
-          if float(exti.split("(")[0].split(".")[1].lstrip("0")) < 3*float(exti.split("(")[1].strip(')')):
+          significant_digit = exti.split("(")[0].split(".")[1].lstrip("0")
+          if significant_digit == "":
+            olex.m("delins EXTI")
+            self.log_sth(f"Deleted EXTI with exti of: {exti}")
+            olex.m("spy.set_refinement_program(olex2.refine, Gauss-Newton)")  
+          elif float(exti.split("(")[0].split(".")[1].lstrip("0")) < 3*float(exti.split("(")[1].strip(')')):
             olex.m("delins EXTI")
             self.log_sth(f"Deleted EXTI with exti of: {exti}")
             olex.m("spy.set_refinement_program(olex2.refine, Gauss-Newton)")
@@ -167,6 +173,7 @@ class FAPJob:                                   # one FAPjob manages the refinem
       olx.xf.EndUpdate()
       if OV.HasGUI():
         olx.Refresh()
+      OV.SetParam('snum.NoSpherA2.Calculate',True)
       OV.SetParam('snum.NoSpherA2.use_aspherical',True)
       OV.SetParam('snum.NoSpherA2.source','ORCA 5.0')
       OV.SetParam('snum.NoSpherA2.precise_output',True)
@@ -645,8 +652,8 @@ class SISYPHOS(PT):
         Raises:
             None
         """
+    out= ""
     if g_path == None:
-      out= ""
       try:
         out = self.chooseDir()
       except:
@@ -659,7 +666,8 @@ class SISYPHOS(PT):
     else:
       self.base_path = g_path
       print(f"Your data lies at:\n{g_path}")
-    olx.html.SetValue('SIS_DIR', out)
+    if OV.HasGUI():
+      olx.html.SetValue('SIS_DIR', out)
     OV.SetParam('sisyphos.gui.working_dir', out)  
     #self.save_sisyphos_phil()
 
@@ -698,7 +706,8 @@ class SISYPHOS(PT):
       self.solution_path = g_path
       self.ins_name = os.path.basename(g_path)
       print(f"Your solution lies at:\n{g_path} with name {self.ins_name}")
-    olx.html.SetValue('SIS_INS', self.ins_name)
+    if OV.HasGUI():
+      olx.html.SetValue('SIS_INS', self.ins_name)
     OV.SetParam('sisyphos.gui.solution_ins',self.ins_name)
     self.save_sisyphos_phil()
     #olex.m("reap '%s'" %out)
@@ -717,7 +726,7 @@ class SISYPHOS(PT):
     elements = []
     if self.perform_disp_ref:
       elements = self.elem_string.split(",")
-    print(self.base_path)
+    print("Base path: ", self.base_path)
 
     # Iterate through all files and directories in the source folder
     for root, dirs, files in os.walk(self.base_path):
@@ -727,19 +736,17 @@ class SISYPHOS(PT):
         # Iterate through all files in the current directory
         for file in files:
           if self.struct:
-            if "SISYoutput" in root:
-              continue
-            elif os.path.join("olex2", "temp") in root or os.path.join("olex2", "Wfn_job") in root:
-              continue
+            if "SISYoutput" in root or (os.path.join("olex2", "temp") in root or os.path.join("olex2", "Wfn_job") in root):
+                print("nope1")
+                continue
             elif file.endswith(".hkl") and "struct" in root:              
                 #source_file = os.path.join(root, file)
                 name = os.path.splitext(file)[0]  # Extract the name without the extension
                 hkls_paths[name] = os.path.join(root,file)
           else:
-            if "SISYoutput" in root:
-              continue
-            elif os.path.join("olex2", "temp") in root or os.path.join("olex2", "Wfn_job") in root:
-              continue
+            if "SISYoutput" in root or (os.path.join("olex2", "temp") in root or os.path.join("olex2", "Wfn_job") in root):
+                print("nope2")
+                continue
             elif file.endswith(".hkl"):              
                 #source_file = os.path.join(root, file)
                 name = os.path.splitext(file)[0]  # Extract the name without the extension
