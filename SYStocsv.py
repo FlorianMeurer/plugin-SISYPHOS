@@ -58,7 +58,7 @@ def main(inputloc, outputloc):
     all_keys = sorted(all_keys)  
     out = os.path.join(outputloc, 'SYSoutput.csv')
     with open(out, "w", newline="") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=all_keys)
+        writer = csv.DictWriter(csvfile, fieldnames=all_keys, delimiter=';')
         writer.writeheader()
         for rec in records:
             writer.writerow(rec)
