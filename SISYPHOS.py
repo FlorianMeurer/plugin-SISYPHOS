@@ -150,6 +150,8 @@ class FAPJob:                                   # one FAPjob manages the refinem
         olex.m("refine 10")
         if self.nos2:
           if self.growed:
+            olex.m("sel $Q")
+            olex.m("kill")
             olex.m("grow")
           olex.m("neutronhdist")
           self.log_sth("H atoms placed to neutron distances (NeutronHDist command)")
@@ -221,9 +223,8 @@ class FAPJob:                                   # one FAPjob manages the refinem
       except Exception as error:
         print(error)
         self.log_sth(str(error))        
-      
       try:
-        dist_stats,dist_errs,R1_all,R1_gt,wR2 = self.extract_bonds_errors()
+        dist_stats,dist_errs,R1_all,R1_gt,wR2,exact_formula = self.extract_bonds_errors()
       except Exception as error:
         print(error)
         print("Could not obtain cctbx object and calculate ESDs!\n")
@@ -259,7 +260,7 @@ class FAPJob:                                   # one FAPjob manages the refinem
         try:
           for key in self.refine_results:
             out.write(str(key) + ":" + str(OV.GetParam("snum.refinement."+key)) + ";")
-          out.write("R1_all:" + str(R1_all) + ";R1_gt:" + str(R1_gt) + ";wR2:" + str(wR2))
+          out.write("R1_all:" + str(R1_all) + ";R1_gt:" + str(R1_gt) + ";wR2:" + str(wR2)+";exact_formula:" + str(exact_formula)+ ";")
           out.write("\nbondlengths:\t")
         except Exception:
           self.log_sth("Could not write refine_results")
@@ -300,12 +301,9 @@ class FAPJob:                                   # one FAPjob manages the refinem
       except:
         self.log_sth("Extraction of DISP Values failed!")
 
-
     def extract_bonds_errors(self):
       dist_stats = {}
       dist_errs = {}
-      disp_stats = {}
-      disp_errs = {}
       R1_all = 0.0
       R1_gt = 0.0
       wR2 = 0.0
@@ -317,7 +315,7 @@ class FAPJob:                                   # one FAPjob manages the refinem
         table_name = str(OV.GetParam("snum.NoSpherA2.file"))
       from refinement import FullMatrixRefine
       # Even though never used we need this import since it initializes things we need later on
-      from olexex import OlexRefinementModel
+      from olexex import OlexRefinementModel 
       from cctbx.array_family import flex
       from scitbx import matrix
       from cctbx.crystal import calculate_distances
@@ -366,13 +364,14 @@ class FAPJob:                                   # one FAPjob manages the refinem
         covariance_matrix=cm,
         cell_covariance_matrix=cell_vcv,
         parameter_map=pm)
-
+      orm = OlexRefinementModel()
+      curr_form = orm.currentFormula()
       #The distances only exist once we iterate over them! Therefore build them and save them in this loop
       for i,d in enumerate(distances):
         bond = sl[d.i_seq]+"-"+sl[d.j_seq]
         dist_stats[bond] = distances.distances[i]
         dist_errs[bond] = math.sqrt(distances.variances[i])
-      return dist_stats,dist_errs,R1_all,R1_gt,wR2
+      return dist_stats,dist_errs,R1_all,R1_gt,wR2,curr_form
 
     def parse_cif(self, loc: str) -> dict:
       """Parses the cif given by loc and returns a dictionary of parsed information
