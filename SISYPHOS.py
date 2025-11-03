@@ -8,6 +8,7 @@ import olx
 import math
 import shutil
 import gc 
+import re
 from return_WL_energy import ret_wl
 from PluginTools import PluginTools as PT
 try:
@@ -724,7 +725,11 @@ class SISYPHOS(PT):
     joblist = []
     elements = []
     if self.perform_disp_ref:
-      elements = self.elem_string.split(",")
+      # allow splitting on commas, semicolons or any whitespace (spaces/tabs/newlines)
+      if not self.elem_string:
+        elements = []
+      else:
+        elements = [e for e in re.split(r"[,;\s]+", self.elem_string.strip()) if e]
     print("Base path: ", self.base_path)
 
     # Iterate through all files and directories in the source folder
