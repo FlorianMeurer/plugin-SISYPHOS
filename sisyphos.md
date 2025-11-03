@@ -1,10 +1,10 @@
 # Welcome to SISYPHOS
 
-`<font color='red'>`**THIS MODULE IS IN DEVELOPMENT, ATM YOU CANNOT STOP A RUNNING PROCEDURE OTHER THAN KILLING OLEX2**`</font>`
-`<br>`
-`<br>`
+<font color='red'>`**THIS MODULE IS IN DEVELOPMENT, ATM YOU CANNOT STOP A RUNNING PROCEDURE OTHER THAN KILLING OLEX2**`</font>
+<br>
+<br>
 
-This tool is meant to provide means of serially refine multiple models against multiple datasets of the same structure.
+This tool is COOL AND  meant to provide means of serially refine multiple models against multiple datasets of the same structure.
 In other words, it solves Sisyphos dilemma for you, repeating the same task for the same structure over and over again.
 It can be used for finding out which crystal was the best out of many (looking at synchrotron users!), or for benchmarking theoretical calculations.
 
