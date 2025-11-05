@@ -18,6 +18,7 @@ def parse_block(block):
         key = key.strip()
         rest = rest.strip()
         if ";" in rest:
+            # composite field: value contains semicolon-separated sub key:val pairs
             if rest == "":
                 record[key] = ""
             else:
@@ -28,7 +29,8 @@ def parse_block(block):
                         continue
                     if ":" in sub:
                         sub_key, sub_val = sub.split(":", 1)
-                        combined_key = sub_key.strip()
+                        # include parent key to avoid collisions between similarly-named subkeys
+                        combined_key = f"{sub_key.strip()}_{key}"
                         record[combined_key] = sub_val.strip()
                     else:
                         continue
@@ -57,8 +59,14 @@ def main(inputloc, outputloc):
         all_keys.update(rec.keys())
     all_keys = sorted(all_keys)  
     out = os.path.join(outputloc, 'SYSoutput.csv')
-    with open(out, "w", newline="") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=all_keys, delimiter=';')
+    # choose delimiter used in CSV (semicolon by default)
+    delimiter = ';'
+    with open(out, "w", newline="", encoding='utf-8') as csvfile:
+        # Write Excel-compatible separator declaration on the first line so
+        # applications (Excel in many locales) can detect the delimiter.
+        # Example: "sep=;" tells Excel that fields are separated by semicolons.
+        csvfile.write(f"sep={delimiter}\n")
+        writer = csv.DictWriter(csvfile, fieldnames=all_keys, delimiter=delimiter)
         writer.writeheader()
         for rec in records:
             writer.writerow(rec)

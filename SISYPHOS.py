@@ -115,7 +115,6 @@ class FAPJob:                                   # one FAPjob manages the refinem
             for elem in self.elements:
               olex.m(f"free disp ${elem}")
               if self.indiv_disps:
-                olex.m("fix disp -c")
                 olex.m(f"free disp ${elem}")
               else:
                 olex.m(f"same disp ${elem}")        
@@ -146,8 +145,7 @@ class FAPJob:                                   # one FAPjob manages the refinem
             self.log_sth(f"Deleted EXTI with exti of: {exti}")
             olex.m("spy.set_refinement_program(olex2.refine, Gauss-Newton)")
           else:
-            self.log_sth("Exti > 3SDs, set L-M instead of G-N")
-            olex.m("spy.set_refinement_program(olex2.refine, Levenberg-Marquardt)")
+            self.log_sth("Exti > 3SDs, EXTI is refined")
         olex.m("refine 10")
         if self.nos2:
           if self.growed:
@@ -371,7 +369,17 @@ class FAPJob:                                   # one FAPjob manages the refinem
       for i,d in enumerate(distances):
         bond = sl[d.i_seq]+"-"+sl[d.j_seq]
         dist_stats[bond] = distances.distances[i]
-        dist_errs[bond] = math.sqrt(distances.variances[i])
+        var = distances.variances[i]
+        self.log_sth(f"Extracted distances for {bond}: {dist_stats[bond]} with variance {var}")
+        # If variance is negative or very small (< 1e-15) treat as non-refined: set to zero.
+        # Log only when the variance is actually negative (not just tiny numerical noise).
+        if var < 1e-15:
+          if var < 0:
+            self.log_sth(f"Negative variance {var} for bond {bond}, set to 0. This may indicate that this distance was constrained, or might be due to model issues.")
+          var = 0.0
+          dist_errs[bond] = 0.0
+        else:
+          dist_errs[bond] = math.sqrt(var)
       return dist_stats,dist_errs,R1_all,R1_gt,wR2,curr_form
 
     def parse_cif(self, loc: str) -> dict:
