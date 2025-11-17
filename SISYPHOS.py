@@ -133,6 +133,13 @@ class FAPJob:                                   # one FAPjob manages the refinem
         for _ in range(3):
           olex.m("refine 5")
         exti = olx.xf.rm.Exti()
+        r1 = OV.GetParam('snum.current_r1')
+        if r1 > 0.65:
+          print(f"R1 is {r1}, stopping refinement")
+          self.log_sth("High R1 detected (>65%) data and model might be incompatible")
+          return
+        else:
+          print(f"R1 is {r1}, data and model might be compatible, continuing refinement")
         self.log_sth(f"Found Extinction: {exti}")
         if exti != "n/a":
           significant_digit = exti.split("(")[0].split(".")[1].lstrip("0")
