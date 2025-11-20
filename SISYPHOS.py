@@ -481,42 +481,154 @@ class FAPJob:                                   # one FAPjob manages the refinem
       self.log_sth(".ins has been setup.")
 
     def setupInsHeader(self) -> None:     # Function for setting .ins if the energy/wl comes from the header   
+      # Preserve TEMP from any original ins if present (original renamed to *_old.ins by earlier code)
       old_ins = os.path.join(self.base_path,f"{self.name}_old.ins")
-      os.rename(os.path.join(self.base_path,f"{self.name}.ins"),old_ins)
-      with open(self.solution_name, "r") as inp, open(os.path.join(self.base_path,self.name+".ins"), "w") as out:
-        energy = self.name.split("_")[-1].split(".")[0]
-        try:
-          wl = ret_wl(float(energy))
-        except:
-          self.log_sth("Filename format not fitting for Energy extraction!")
+      try:
+        os.rename(os.path.join(self.base_path,f"{self.name}.ins"),old_ins)
+      except Exception:
+        # if original not present or rename fails, continue silently
+        old_ins = None
+
+      # try to obtain TEMP line from original ins (either the renamed one or the original if still present)
+      temp_line = None
+      for cand in [old_ins, os.path.join(self.base_path, f"{self.name}.ins")]:
+        if cand and os.path.exists(cand):
+          try:
+            with open(cand, 'r') as fo:
+              for l in fo:
+                if l.strip().upper().startswith('TEMP'):
+                  temp_line = l.rstrip('\n')
+                  break
+          except Exception:
+            pass
+        if temp_line:
+          break
+
+      # build output lines from solution ins but inject/replace TEMP with the original if available
+      energy = self.name.split("_")[-1].split(".")[0]
+      try:
+        wl = ret_wl(float(energy))
+      except:
+        self.log_sth("Filename format not fitting for Energy extraction!")
+        wl = None
+
+      out_lines = []
+      temp_inserted = False
+      with open(self.solution_name, 'r') as inp:
         for line in inp:
-          if "CELL" in line:
+          if 'CELL' in line and wl is not None:
             buffer = line.split(" ")
             buffer[1] = str(round(wl, 6))
-            line = " ".join(buffer)
-          out.write(line)
+            newline = " ".join(buffer)
+            out_lines.append(newline)
+            # insert TEMP immediately after CELL if we have it
+            if temp_line and not temp_inserted:
+              out_lines.append(temp_line + '\n')
+              temp_inserted = True
+            continue
+          if line.strip().upper().startswith('TEMP'):
+            if temp_line:
+              out_lines.append(temp_line + '\n')
+              temp_inserted = True
+            else:
+              out_lines.append(line)
+            continue
+          out_lines.append(line)
+
+      if temp_line and not temp_inserted:
+        # fallback: insert at top
+        out_lines.insert(0, temp_line + '\n')
+
+      with open(os.path.join(self.base_path,self.name+".ins"), "w") as out:
+        out.writelines(out_lines)
       self.correct_ins()      
       self.final_ins_path = os.path.join(self.base_path,self.name+".ins")
 
     def setupInsIns(self) -> None:      # Function for setting .ins if the energy/wl comes from the .ins
       old_ins = os.path.join(self.base_path,f"{self.name}_old.ins")
-      os.rename(os.path.join(self.base_path,f"{self.name}.ins"),old_ins)
-      with open(self.solution_name, "r") as inp, open(old_ins, "r") as old_inp, open(os.path.join(self.base_path,self.name+".ins"), "w") as out:
-        cell = ""
-        for line in old_inp:
-          if "CELL" in line:
-            cell = line
+      try:
+        os.rename(os.path.join(self.base_path,f"{self.name}.ins"),old_ins)
+      except Exception:
+        old_ins = None
+      temp_line = None
+      for cand in [old_ins, os.path.join(self.base_path, f"{self.name}.ins")]:
+        if cand and os.path.exists(cand):
+          try:
+            with open(cand, 'r') as fo:
+              for l in fo:
+                if l.strip().upper().startswith('TEMP'):
+                  temp_line = l.rstrip('\n')
+                  break
+          except Exception:
+            pass
+        if temp_line:
+          break
+
+      cell = ""
+      if old_ins and os.path.exists(old_ins):
+        with open(old_ins, 'r') as old_inp:
+          for line in old_inp:
+            if "CELL" in line:
+              cell = line
+
+      out_lines = []
+      temp_inserted = False
+      with open(self.solution_name, 'r') as inp:
         for line in inp:
-          if "CELL" in line:
-            line = cell
-          out.write(line)      
+          if "CELL" in line and cell:
+            out_lines.append(cell)
+            if temp_line and not temp_inserted:
+              out_lines.append(temp_line + '\n')
+              temp_inserted = True
+            continue
+          if line.strip().upper().startswith('TEMP'):
+            if temp_line:
+              out_lines.append(temp_line + '\n')
+              temp_inserted = True
+            else:
+              out_lines.append(line)
+            continue
+          out_lines.append(line)
+
+      if temp_line and not temp_inserted:
+        out_lines.insert(0, temp_line + '\n')
+
+      with open(os.path.join(self.base_path,self.name+".ins"), "w") as out:
+        out.writelines(out_lines)
       self.correct_ins()      
       self.final_ins_path = os.path.join(self.base_path,self.name+".ins")
 
     def setupInsDefault(self) -> None:
-      with open(self.solution_name, "r") as inp, open(os.path.join(self.base_path, f"{self.name}.ins"), "w") as out:
+      orig_ins = os.path.join(self.base_path, f"{self.name}.ins")
+      temp_line = None
+      if os.path.exists(orig_ins):
+        try:
+          with open(orig_ins, 'r') as fo:
+            for l in fo:
+              if l.strip().upper().startswith('TEMP'):
+                temp_line = l.rstrip('\n')
+                break
+        except Exception:
+          temp_line = None
+
+      out_lines = []
+      temp_inserted = False
+      with open(self.solution_name, 'r') as inp:
         for line in inp:
-          out.write(line)
+          if line.strip().upper().startswith('TEMP'):
+            if temp_line:
+              out_lines.append(temp_line + '\n')
+              temp_inserted = True
+            else:
+              out_lines.append(line)
+            continue
+          out_lines.append(line)
+
+      if temp_line and not temp_inserted:
+        out_lines.insert(0, temp_line + '\n')
+
+      with open(os.path.join(self.base_path, f"{self.name}.ins"), "w") as out:
+        out.writelines(out_lines)
       self.correct_ins()
       self.final_ins_path = os.path.join(self.base_path, f"{self.name}.ins")
 
