@@ -137,7 +137,7 @@ $-
 <!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
 
 <!-- #include tool-row-help gui/blocks/tool-row-help.htm;name=Modes; help_ext=Modes;1; -->
-<td ALIGN='left' width='21%'>
+<td ALIGN='left' width='20%' style="vertical-align: middle;">
     <b>Mode options</b>
     <br>
 </td>
@@ -179,6 +179,16 @@ $-
     )
     $-
 </td>
+
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+<!-- #include tool-row-help gui/blocks/tool-row-help.htm;name=Modes; help_ext=Modes;1; -->
+<td ALIGN='left' width='20%' style="vertical-align: middle;">
+    <b>Refine/Search options</b>
+    <br>
+</td>
+
+
 <td width='2%' align="left">
     $+
     html.Snippet("gui/snippets/input-checkbox-td",
@@ -200,8 +210,21 @@ $-
     "oncheck=spy.SetParam('sisyphos.struct_only','True')>>html.Update()",
     "bgcolor=GetVar(HtmlTableRowBgColour)",
     "onuncheck=spy.SetParam('sisyphos.struct_only','False')>>html.Update()"
-    )
-  $-
+        )
+    $-
+</td>
+
+<td width='2%' align="left">
+    $+
+        html.Snippet("gui/snippets/input-checkbox-td",
+        "name=Growed",
+        "label=Growed",
+        "checked=spy.GetParam('sisyphos.growed')",
+        "oncheck=spy.SetParam('sisyphos.growed','True')>>html.Update()",
+        "bgcolor=GetVar(HtmlTableRowBgColour)",
+        "onuncheck=spy.SetParam('sisyphos.growed','False')>>html.Update()"
+        )
+    $-
 </td>
 
 <!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->

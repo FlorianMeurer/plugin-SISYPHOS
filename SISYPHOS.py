@@ -9,6 +9,7 @@ import math
 import shutil
 import gc 
 import re
+from cif_u_extractor import extract_u_values_from_cif
 from return_WL_energy import ret_wl
 from PluginTools import PluginTools as PT
 try:
@@ -389,14 +390,181 @@ class FAPJob:                                   # one FAPjob manages the refinem
           dist_errs[bond] = math.sqrt(var)
       return dist_stats,dist_errs,R1_all,R1_gt,wR2,curr_form
 
-    def parse_cif(self, loc: str) -> dict:
+    from typing import Tuple, Dict, Any
+
+    def parse_cif(self, loc: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Parses the cif given by loc and returns a dictionary of parsed information
+
+        Args:
+            loc (str): Path to the .cif file to be analyzed
+
+        Returns:
+            (dict, dict): (Result dictionary from cif, dispersion dictionary)
+        """
+        self.log_sth(f"Starting CIF parsing: {loc}")
+
+        dat_names = [
+            "mu",
+            "wavelength",
+            "F000",
+            "tot_reflIns",
+            "goof",
+            "R_all",
+            "R1",
+            "wR2",
+            "last Shift",
+        ]
+
+        corr_filts = [
+            "_exptl_absorpt_coefficient_mu ",  # note the trailing space
+            "_diffrn_radiation_wavelength",
+            "_exptl_crystal_F_000",
+            "_diffrn_reflns_number",
+            "_refine_ls_goodness_of_fit_ref",
+            "_refine_ls_R_factor_all",
+            "_refine_ls_R_factor_gt",
+            "_refine_ls_wR_factor_ref",
+            "REM Shift_max",
+        ]
+
+        out_dict: Dict[str, Any] = {}
+        disp_dict: Dict[str, Any] = {}
+
+        # ------------------------------------------------------------------
+        # 1) Basic scalar/refinement values
+        # ------------------------------------------------------------------
+        try:
+            with open(loc, "r") as incif:
+                lines = incif.readlines()
+
+            for idx, line in enumerate(lines):
+                for i, filter_str in enumerate(corr_filts):
+                    if filter_str in line:
+                        self.log_sth(
+                            f"Found tag '{filter_str}' (target key '{dat_names[i]}') on line {idx + 1}"
+                        )
+                        parts = line.split()
+                        # try to get value from the same line
+                        if len(parts) > 1:
+                            try:
+                                value = float(parts[-1])
+                                out_dict[dat_names[i]] = value
+                            except (ValueError, IndexError) as e:
+                                self.log_sth(
+                                    f"Failed to parse value from '{filter_str}' on the same line "
+                                    f"(line {idx + 1}): '{line.strip()}', error={e}. "
+                                    "Setting value to NaN."
+                                )
+                                out_dict[dat_names[i]] = math.nan
+                        else:
+                            # if value is on the next line
+                            if idx + 1 < len(lines):
+                                try:
+                                    value = float(lines[idx + 1].strip())
+                                    out_dict[dat_names[i]] = value
+                                except (ValueError, IndexError) as e:
+                                    self.log_sth(
+                                        f"Failed to parse value from next line after '{filter_str}' "
+                                        f"(lines {idx + 1}/{idx + 2}): error={e}. Setting value to NaN."
+                                    )
+                                    out_dict[dat_names[i]] = math.nan
+
+            # ensure every dat_name is present; if not found → NaN
+            for name in dat_names:
+                if name not in out_dict:
+                    self.log_sth(
+                        f"No value found for '{name}' (no matching tag or parse failure). "
+                        "Setting value to NaN."
+                    )
+                    out_dict[name] = math.nan
+
+            self.log_sth("Basic CIF extraction successful :)")
+
+        except Exception as e:
+            self.log_sth(f"Basic CIF extraction failed with exception: {e}")
+
+        # ------------------------------------------------------------------
+        # 2) Extended info: U values & dispersion
+        # ------------------------------------------------------------------
+        try:
+            # --- Uiso/Ueq + anisotropic U_ij values from dedicated CIF loop parser ---
+            u_data = extract_u_values_from_cif(loc)
+
+            u_iso = u_data.get("u_iso", {})
+            for atom, parsed in u_iso.items():
+                out_dict[f"{atom}_ueq"] = (
+                    parsed.get("value", math.nan),
+                    parsed.get("esd", math.nan),
+                )
+
+            u_aniso = u_data.get("u_aniso", {})
+            for atom, components in u_aniso.items():
+                for comp_name, parsed in components.items():
+                    out_dict[f"{atom}_{comp_name}"] = (
+                        parsed.get("value", math.nan),
+                        parsed.get("esd", math.nan),
+                    )
+
+            self.log_sth(
+                f"Parsed U values from CIF: {len(u_iso)} isotropic entries, "
+                f"{len(u_aniso)} anisotropic entries"
+            )
+
+            # --- Dispersion data ---
+            with open(loc, "r") as incif:
+                if self.disp:
+                    switch3 = False
+                    line_no = 0
+                    for line in incif:
+                        line_no += 1
+
+                        # when we are inside dispersion block and see blank line, close block
+                        if switch3 and not line.strip():
+                            switch3 = False
+                            continue
+
+                        if switch3:
+                            adr = line.split()
+                            if len(adr) < 3:
+                                self.log_sth(
+                                    f"Skipping malformed dispersion line {line_no}: "
+                                    f"'{line.strip()}'"
+                                )
+                                continue
+                            disp_dict[adr[0]] = (adr[1], adr[2])
+
+                        if line.startswith("  _atom_site_dispersion_imag"):
+                            switch3 = True
+                            self.log_sth(
+                                f"Found atom dispersion block (_atom_site_dispersion_imag) "
+                                f"at line {line_no}"
+                            )
+
+            self.log_sth("Extended CIF extraction successful :)")
+
+        except Exception as e:
+            # here 'line' might not be defined, so don't refer to it directly
+            self.log_sth(
+                f"Extended CIF extraction failed for '{loc}' with exception: {e}. "
+                "Returning whatever could be parsed so far."
+            )
+
+        self.log_sth(f"Final parsed scalar values: {out_dict}")
+        if disp_dict:
+            self.log_sth(f"Final parsed dispersion entries: {len(disp_dict)} records")
+        else:
+            self.log_sth("No dispersion data parsed (either not present or self.disp=False)")
+
+        return out_dict, disp_dict
+
+    def parse_cif2(self, loc: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
       """Parses the cif given by loc and returns a dictionary of parsed information
 
       Args:
           loc (str): Path to the .cif file to be analyzed
 
       Returns:
-          dict: Result dictionary from cif
+          (dict, dict): (Result dictionary from cif, dispersion dictionary)
       """
       print("loc", loc)
       dat_names = ["mu", 
@@ -409,28 +577,45 @@ class FAPJob:                                   # one FAPjob manages the refinem
         "wR2", 
         "last Shift"]
 
-      corr_filts = ["exptl_absorpt_coefficient_mu", 
-                    "diffrn_radiation_wavelength", 
-                    "exptl_crystal_F_000",
-                    "diffrn_reflns_number",
-                    "refine_ls_goodness_of_fit_ref",
-                    "refine_ls_R_factor_all",
-                    "refine_ls_R_factor_gt",
-                    "refine_ls_wR_factor_ref",
-                    "REM Shift_max"]
-      out = {}
-      disp_dict = {}
+      corr_filts = [
+        "_exptl_absorpt_coefficient_mu ",  
+        "_diffrn_radiation_wavelength",
+        "_exptl_crystal_F_000",
+        "_diffrn_reflns_number",
+        "_refine_ls_goodness_of_fit_ref",
+        "_refine_ls_R_factor_all",
+        "_refine_ls_R_factor_gt",
+        "_refine_ls_wR_factor_ref",
+        "REM Shift_max",
+    ]
+      out_dict: Dict[str, Any] = {}
+      disp_dict: Dict[str, Any] = {}
       try:
         with open(loc, "r") as incif:
-            for line in incif:
-                for i,filter in enumerate(corr_filts):
-                    if filter in line:
-                        out[f"{dat_names[i]}"] = float(line.split()[-1])
+            lines = incif.readlines()
+            for idx, line in enumerate(lines):
+                for i, filter_str in enumerate(corr_filts):
+                    if filter_str in line:
+                        parts = line.split()
+                        if len(parts) > 1:
+                            try:
+                                value = float(parts[-1])
+                                out_dict[f"{dat_names[i]}"] = value
+                            except (ValueError, IndexError) as e:
+                                self.log_sth(f"Failed to parse value from {filter_str}: line='{line.strip()}', error={e}")
+                        else:
+                            if idx + 1 < len(lines):
+                                try:
+                                    value = float(lines[idx + 1].strip())
+                                    out_dict[f"{dat_names[i]}"] = value
+                                except (ValueError, IndexError) as e:
+                                    self.log_sth(f"Failed to parse value from next line after {filter_str}: error={e}")
         self.log_sth("Basic cif extraction succesfull :)")
-      except:
-        self.log_sth("Basic cif extraction failed!")
+      except Exception as e:
+        self.log_sth(f"Basic cif extraction failed with exception: {e}")
       try:
         with open(loc, "r") as incif:
+          print("Final outdict",out_dict)
           switch2 = False
           for line in incif:
             if line.startswith("  _atom_site_refinement_flags_occupancy"):
@@ -444,7 +629,7 @@ class FAPJob:                                   # one FAPjob manages the refinem
                 atom = lin[1]
                 ueq = lin[6].split("(")[0]
                 ueq_delta = lin[6].split("(")[1][:-1]
-                out[f"{atom}_ueq"] = (float(ueq), int(ueq_delta))
+                out_dict[f"{atom}_ueq"] = (float(ueq), int(ueq_delta))
         with open(loc, "r") as incif:
           if self.disp:
             switch3 = False
@@ -462,7 +647,9 @@ class FAPJob:                                   # one FAPjob manages the refinem
         self.log_sth(f"Failed at line {line}")
         self.log_sth(str(e))
         self.log_sth("Extended cif extraction failed!")
-      return out, disp_dict
+      return out_dict, disp_dict
+    
+    
 
     def get_elements(self) -> list:
       return [
@@ -582,10 +769,13 @@ class FAPJob:                                   # one FAPjob manages the refinem
 
       cell = ""
       if old_ins and os.path.exists(old_ins):
-        with open(old_ins, 'r') as old_inp:
-          for line in old_inp:
-            if "CELL" in line:
-              cell = line
+        try:
+          with open(old_ins, 'r') as old_inp:
+            for line in old_inp:
+              if "CELL" in line:
+                cell = line
+        except Exception:
+          self.log_sth(Exception)
 
       out_lines = []
       temp_inserted = False
@@ -994,10 +1184,10 @@ class SISYPHOS(PT):
     os.mkdir(new_dir)
     shutil.copy(hkls_paths[key], new_dir)
     shutil.copy(self.solution_path, os.path.join(new_dir,"solution.ins"))
-    poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
+    poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
     print(poss_ins_path)
-    if os.path.exists(poss_ins_path):
-      shutil.copy(poss_ins_path, new_dir)
+    if poss_ins_path:
+      shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
       if OV.IsEDData():
         shutil.copy(hkls_paths[key].split(".")[0]+".cif_od", new_dir)
     hkls_paths[key] = new_dir
@@ -1051,9 +1241,9 @@ class SISYPHOS(PT):
     os.mkdir(new_dir)
     shutil.copy(hkls_paths[key], new_dir)
     shutil.copy(self.solution_path, new_dir)
-    poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
-    if os.path.exists(poss_ins_path):
-      shutil.copy(poss_ins_path, new_dir)
+    poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+    if poss_ins_path:
+      shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
     return(FAPJob(                                   # create the FAPJob object here
                           base_path = new_dir, 
                           solution_name = self.solution_path, 
@@ -1090,9 +1280,9 @@ class SISYPHOS(PT):
     os.mkdir(new_dir)
     shutil.copy(hkls_paths[key], new_dir)
     shutil.copy(self.solution_path, new_dir)
-    poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
-    if os.path.exists(poss_ins_path):
-      shutil.copy(poss_ins_path, new_dir)
+    poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+    if poss_ins_path:
+      shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
     return(FAPJob(                                   # create the FAPJob object here
                           base_path = new_dir, 
                           solution_name = self.solution_path, 
@@ -1138,9 +1328,9 @@ class SISYPHOS(PT):
           os.mkdir(new_dir)
           shutil.copy(hkls_paths[key], new_dir)
           shutil.copy(self.solution_path, new_dir)
-          poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
-          if os.path.exists(poss_ins_path):
-            shutil.copy(poss_ins_path, new_dir)
+          poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+          if poss_ins_path:
+            shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
           return(FAPJob(                                   # create the FAPJob object here
                                 base_path = new_dir,
                                 solution_name = self.solution_path, 
@@ -1167,9 +1357,9 @@ class SISYPHOS(PT):
       os.mkdir(new_dir)
       shutil.copy(hkls_paths[key], new_dir)
       shutil.copy(self.solution_path, new_dir)
-      poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
-      if os.path.exists(poss_ins_path):
-          shutil.copy(poss_ins_path, new_dir)
+        poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+        if poss_ins_path:
+          shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
       return(FAPJob( 
                                 base_path = new_dir, 
                                 solution_name = self.solution_path, 
@@ -1185,6 +1375,20 @@ class SISYPHOS(PT):
                                 nos2_dict = nos2_dict_cp.copy()
                                 )
                       )
+
+  def get_corresponding_ins_path(self, hkl_path:str) -> str:
+    """Return matching .ins for an .hkl path, with _hklf5 -> _hklf4 fallback."""
+    poss_ins_path = os.path.splitext(hkl_path)[0] + ".ins"
+    if os.path.exists(poss_ins_path):
+      return poss_ins_path
+
+    hkl_root = os.path.splitext(hkl_path)[0]
+    if hkl_root.lower().endswith("_hklf5"):
+      hklf4_root = hkl_root[:-6] + "_hklf4"
+      hklf4_ins_path = hklf4_root + ".ins"
+      if os.path.exists(hklf4_ins_path):
+        return hklf4_ins_path
+    return ""
 
   def prepare_outdir(self) -> None:
     """Prepare the output directory.
@@ -1244,7 +1448,7 @@ class SISYPHOS(PT):
                   "cluster_radius", "DIIS",
                   "cluster_grow", "ORCA_SCF_Conv",
                   "ORCA_SCF_Strategy", "ORCA_Solvation",
-                  "pySCF_Damping", "ORCA_DAMP"]
+                  "pySCF_Damping", "ORCA_DAMP","basis_adv","basis_adv_string"]
     for param in nos_params:
       self.nos2_dict[param] = OV.GetParam(f"snum.NoSpherA2.{param}")
 
