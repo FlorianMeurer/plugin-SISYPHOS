@@ -1357,8 +1357,8 @@ class SISYPHOS(PT):
       os.mkdir(new_dir)
       shutil.copy(hkls_paths[key], new_dir)
       shutil.copy(self.solution_path, new_dir)
-        poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
-        if poss_ins_path:
+      poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+      if poss_ins_path:
           shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
       return(FAPJob( 
                                 base_path = new_dir, 
