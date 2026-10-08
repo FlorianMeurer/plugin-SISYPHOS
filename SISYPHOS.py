@@ -9,6 +9,7 @@ import math
 import shutil
 import gc 
 import re
+from cif_u_extractor import extract_u_values_from_cif
 from return_WL_energy import ret_wl
 from PluginTools import PluginTools as PT
 try:
@@ -525,71 +526,31 @@ class FAPJob:                                   # one FAPjob manages the refinem
             self.log_sth(f"Basic CIF extraction failed with exception: {e}")
 
         # ------------------------------------------------------------------
-        # 2) Extended info: U_eq values & dispersion
+        # 2) Extended info: U values & dispersion
         # ------------------------------------------------------------------
         try:
-            # --- U_eq values ---
-            with open(loc, "r") as incif:
-                switch2 = False
-                line_no = 0
+            # --- Uiso/Ueq + anisotropic U_ij values from dedicated CIF loop parser ---
+            u_data = extract_u_values_from_cif(loc)
 
-                for line in incif:
-                    line_no += 1
-                    if line.startswith("  _atom_site_refinement_flags_occupancy"):
-                        switch2 = True
-                        self.log_sth(
-                            f"Found atom refinement block (occupancy flags) at line {line_no}"
-                        )
-                        continue
+            u_iso = u_data.get("u_iso", {})
+            for atom, parsed in u_iso.items():
+                out_dict[f"{atom}_ueq"] = (
+                    parsed.get("value", math.nan),
+                    parsed.get("esd", math.nan),
+                )
 
-                    if switch2:
-                        # end of block on empty line
-                        if not line.strip():
-                            switch2 = False
-                            continue
+            u_aniso = u_data.get("u_aniso", {})
+            for atom, components in u_aniso.items():
+                for comp_name, parsed in components.items():
+                    out_dict[f"{atom}_{comp_name}"] = (
+                        parsed.get("value", math.nan),
+                        parsed.get("esd", math.nan),
+                    )
 
-                        lin = line.split()
-                        if len(lin) < 7:
-                            self.log_sth(
-                                f"Skipping malformed atom line {line_no} in refinement block: "
-                                f"'{line.strip()}'"
-                            )
-                            continue
-
-                        atom = lin[1]
-                        ueq_token = lin[6]
-
-                        # handle values with esd 'value(esd)'
-                        if "(" in ueq_token:
-                            ueq_main, ueq_esd = ueq_token.split("(", 1)
-                            ueq_esd = ueq_esd.rstrip(")")
-                        else:
-                            ueq_main, ueq_esd = ueq_token, None
-
-                        # parse main U_eq value
-                        try:
-                            ueq_val = float(ueq_main)
-                        except ValueError as e:
-                            self.log_sth(
-                                f"Failed to parse U_eq for atom '{atom}' at line {line_no}: "
-                                f"token='{ueq_token}', error={e}. Setting U_eq to NaN."
-                            )
-                            ueq_val = math.nan
-
-                        # parse esd if present
-                        if ueq_esd is not None:
-                            try:
-                                ueq_esd_val = int(ueq_esd)
-                            except ValueError as e:
-                                self.log_sth(
-                                    f"Failed to parse U_eq esd for atom '{atom}' at line {line_no}: "
-                                    f"token='{ueq_token}', error={e}. Setting esd to NaN."
-                                )
-                                ueq_esd_val = math.nan
-                        else:
-                            ueq_esd_val = math.nan
-
-                        out_dict[f"{atom}_ueq"] = (ueq_val, ueq_esd_val)
+            self.log_sth(
+                f"Parsed U values from CIF: {len(u_iso)} isotropic entries, "
+                f"{len(u_aniso)} anisotropic entries"
+            )
 
             # --- Dispersion data ---
             with open(loc, "r") as incif:
@@ -850,10 +811,13 @@ class FAPJob:                                   # one FAPjob manages the refinem
 
       cell = ""
       if old_ins and os.path.exists(old_ins):
-        with open(old_ins, 'r') as old_inp:
-          for line in old_inp:
-            if "CELL" in line:
-              cell = line
+        try:
+          with open(old_ins, 'r') as old_inp:
+            for line in old_inp:
+              if "CELL" in line:
+                cell = line
+        except Exception:
+          self.log_sth(Exception)
 
       out_lines = []
       temp_inserted = False
@@ -1283,10 +1247,10 @@ class SISYPHOS(PT):
     os.mkdir(new_dir)
     shutil.copy(hkls_paths[key], new_dir)
     shutil.copy(self.solution_path, os.path.join(new_dir,"solution.ins"))
-    poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
+    poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
     print(poss_ins_path)
-    if os.path.exists(poss_ins_path):
-      shutil.copy(poss_ins_path, new_dir)
+    if poss_ins_path:
+      shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
       if OV.IsEDData():
         shutil.copy(hkls_paths[key].split(".")[0]+".cif_od", new_dir)
     hkls_paths[key] = new_dir
@@ -1340,9 +1304,9 @@ class SISYPHOS(PT):
     os.mkdir(new_dir)
     shutil.copy(hkls_paths[key], new_dir)
     shutil.copy(self.solution_path, new_dir)
-    poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
-    if os.path.exists(poss_ins_path):
-      shutil.copy(poss_ins_path, new_dir)
+    poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+    if poss_ins_path:
+      shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
     return(FAPJob(                                   # create the FAPJob object here
                           base_path = new_dir, 
                           solution_name = self.solution_path, 
@@ -1379,9 +1343,9 @@ class SISYPHOS(PT):
     os.mkdir(new_dir)
     shutil.copy(hkls_paths[key], new_dir)
     shutil.copy(self.solution_path, new_dir)
-    poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
-    if os.path.exists(poss_ins_path):
-      shutil.copy(poss_ins_path, new_dir)
+    poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+    if poss_ins_path:
+      shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
     return(FAPJob(                                   # create the FAPJob object here
                           base_path = new_dir, 
                           solution_name = self.solution_path, 
@@ -1427,9 +1391,9 @@ class SISYPHOS(PT):
           os.mkdir(new_dir)
           shutil.copy(hkls_paths[key], new_dir)
           shutil.copy(self.solution_path, new_dir)
-          poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
-          if os.path.exists(poss_ins_path):
-            shutil.copy(poss_ins_path, new_dir)
+          poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+          if poss_ins_path:
+            shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
           return(FAPJob(                                   # create the FAPJob object here
                                 base_path = new_dir,
                                 solution_name = self.solution_path, 
@@ -1456,9 +1420,9 @@ class SISYPHOS(PT):
       os.mkdir(new_dir)
       shutil.copy(hkls_paths[key], new_dir)
       shutil.copy(self.solution_path, new_dir)
-      poss_ins_path = hkls_paths[key].split(".")[0]+".ins"
-      if os.path.exists(poss_ins_path):
-          shutil.copy(poss_ins_path, new_dir)
+      poss_ins_path = self.get_corresponding_ins_path(hkls_paths[key])
+      if poss_ins_path:
+          shutil.copy(poss_ins_path, os.path.join(new_dir, f"{key}.ins"))
       return(FAPJob( 
                                 base_path = new_dir, 
                                 solution_name = self.solution_path, 
@@ -1474,6 +1438,20 @@ class SISYPHOS(PT):
                                 nos2_dict = nos2_dict_cp.copy()
                                 )
                       )
+
+  def get_corresponding_ins_path(self, hkl_path:str) -> str:
+    """Return matching .ins for an .hkl path, with _hklf5 -> _hklf4 fallback."""
+    poss_ins_path = os.path.splitext(hkl_path)[0] + ".ins"
+    if os.path.exists(poss_ins_path):
+      return poss_ins_path
+
+    hkl_root = os.path.splitext(hkl_path)[0]
+    if hkl_root.lower().endswith("_hklf5"):
+      hklf4_root = hkl_root[:-6] + "_hklf4"
+      hklf4_ins_path = hklf4_root + ".ins"
+      if os.path.exists(hklf4_ins_path):
+        return hklf4_ins_path
+    return ""
 
   def prepare_outdir(self) -> None:
     """Prepare the output directory.

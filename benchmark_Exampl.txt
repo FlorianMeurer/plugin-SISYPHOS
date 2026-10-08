@@ -1,1 +1,2 @@
 method:r2SCAN;basis_name:def2-SVP;ORCA_SCNL:False;ORCA_Solvation:Vacuum;becke_accuracy:Normal;ORCA_SCF_Conv:NoSpherA2SCF;full_HAR:False
+method:r2SCAN;basis_name:def2-TZVP;ORCA_SCNL:False;ORCA_Solvation:Vacuum;becke_accuracy:Normal;ORCA_SCF_Conv:NoSpherA2SCF;full_HAR:False
