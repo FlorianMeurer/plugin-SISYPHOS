@@ -42,6 +42,26 @@ sisyphos{
   struct_only = True
   .type = bool
 
+  use_refine_settings = False
+  .type = bool
+
+  refine{
+    program = olex2.refine
+    .type = str
+    method = Gauss-Newton
+    .type = str
+    max_peaks = 0
+    .type = int
+    use_mask = False
+    .type = bool
+    mask_program = Olex2
+    .type = str
+    solvent_radius = ""
+    .type = str
+    truncation_radius = ""
+    .type = str
+  }
+
   gui{
     location = 'tools'
       .type = str

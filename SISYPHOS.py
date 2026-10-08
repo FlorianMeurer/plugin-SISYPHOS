@@ -60,6 +60,9 @@ class FAPJob:                                   # one FAPjob manages the refinem
       self.benchmark = benchmark
       self.nos2_dict = nos2_dict              #all parameters from nosphera2 settings
       self.final_ins_path = ""                #will be set depending on other params in method setup ins
+      self.prg = "olex2.refine"               #refinement program, taken from the SISYPHOS refinement settings if sisyphos.use_refine_settings is on
+      self.method = "Gauss-Newton"
+      self.shelx = False                      #True if a SHELX program is selected in the SISYPHOS refinement settings
       self.refine_results = {
         "max_peak"  : 0.0,
         "max_hole"  : 0.0,
@@ -101,6 +104,12 @@ class FAPJob:                                   # one FAPjob manages the refinem
         print("Refining...")
         olex.m(f"reap {self.final_ins_path}")
         self.log_sth(f"Was able to load .ins: {self.final_ins_path}")
+        if OV.GetParam('sisyphos.use_refine_settings'):
+          self.apply_refine_settings()
+          if self.shelx:
+            msg = "WARNING: SHELX Refinement mode, ADR, NoSpherA2 and anharmonicity are not modelable in this mode. ESD extraction is currently not available."
+            print(msg)
+            self.log_sth(msg)
         self.log_sth("=========================== Starting New Refinment ===========================")
         olx.AddIns("EXTI") 
         olx.AddIns("ACTA")
@@ -111,7 +120,9 @@ class FAPJob:                                   # one FAPjob manages the refinem
           if self.disp_source != "refined":
             olex.m(f"gendisp -force -source={self.disp_source}")
             self.log_sth(fr"{self.name}:\t Forced gendisp command with {self.disp_source} as dispersion source!\n")
-          if self.disp_source == "refined":
+          if self.disp_source == "refined" and self.shelx:
+            self.log_sth("SHELXL cannot refine DISP, DISP values stay fixed")
+          if self.disp_source == "refined" and not self.shelx:
             for elem in self.elements:
               olex.m(f"free disp ${elem}")
               if self.indiv_disps:
@@ -128,10 +139,16 @@ class FAPJob:                                   # one FAPjob manages the refinem
           OV.SetParam('snum.refinement.update_weight', False)
           self.log_sth("keeping weighting scheme")
         if not self.disp:
-          olex.m("spy.set_refinement_program(olex2.refine, Gauss-Newton)")
-          self.log_sth("Set refinement engine olex2.refine with G-N")
+          self.set_program()
+          self.log_sth(f"Set refinement engine {self.prg} with {self.method}")
+        recompute_mask = bool(OV.GetParam('snum.refinement.use_solvent_mask'))
+        if recompute_mask:
+          OV.SetParam('snum.refinement.recompute_mask_before_refinement', True)
+          self.log_sth("Solvent mask in use, recomputing it for this data set")
         for _ in range(3):
           olex.m("refine 5")
+          if recompute_mask and _ == 1:
+            OV.SetParam('snum.refinement.recompute_mask_before_refinement', False)
         exti = olx.xf.rm.Exti()
         r1 = OV.GetParam('snum.current_r1')
         if r1 > 0.65:
@@ -146,15 +163,17 @@ class FAPJob:                                   # one FAPjob manages the refinem
           if significant_digit == "":
             olex.m("delins EXTI")
             self.log_sth(f"Deleted EXTI with exti of: {exti}")
-            olex.m("spy.set_refinement_program(olex2.refine, Gauss-Newton)")  
+            self.set_program()
           elif float(exti.split("(")[0].split(".")[1].lstrip("0")) < 3*float(exti.split("(")[1].strip(')')):
             olex.m("delins EXTI")
             self.log_sth(f"Deleted EXTI with exti of: {exti}")
-            olex.m("spy.set_refinement_program(olex2.refine, Gauss-Newton)")
+            self.set_program()
           else:
             self.log_sth("Exti > 3SDs, EXTI is refined")
         olex.m("refine 10")
-        if self.nos2:
+        if self.nos2 and self.shelx:
+          self.log_sth("NoSpherA2 is not available with SHELXL, skipping")
+        elif self.nos2:
           if self.growed:
             olex.m("sel $Q")
             olex.m("kill")
@@ -165,7 +184,7 @@ class FAPJob:                                   # one FAPjob manages the refinem
           olex.m("refine 10")
         counter = 0
         self.log_sth(f'Final Shift: {abs(OV.GetParam("snum.refinement.max_shift_over_esd"))}')
-        olex.m("spy.set_refinement_program(olex2.refine, Gauss-Newton)")
+        self.set_program()
         olex.m("refine 12")
         while abs(OV.GetParam("snum.refinement.max_shift_over_esd")) > 0.005:
           olex.m("refine 12")
@@ -176,6 +195,24 @@ class FAPJob:                                   # one FAPjob manages the refinem
       except Exception as error:
         self.log_sth(str(error))
         self.log_sth("Failed during refinenement!")
+
+    def set_program(self) -> None:
+      OV.set_refinement_program(self.prg, self.method)
+
+    def apply_refine_settings(self) -> None:
+      """Applies the settings of the SISYPHOS refinement section to the freshly loaded model."""
+      self.prg = str(OV.GetParam('sisyphos.refine.program'))
+      self.method = str(OV.GetParam('sisyphos.refine.method'))
+      self.shelx = self.prg.lower().startswith('shelx')
+      self.set_program()
+      OV.SetMaxPeaks(OV.GetParam('sisyphos.refine.max_peaks'))
+      olex.m(f"spy.SetMasking({'true' if OV.GetParam('sisyphos.refine.use_mask') else 'false'})")
+      OV.SetParam('snum.refinement.recompute_mask_before_refinement_prg', OV.GetParam('sisyphos.refine.mask_program'))
+      for key, snum_key in (('solvent_radius', 'solvent_radius'), ('truncation_radius', 'shrink_truncation_radius')):
+        val = OV.GetParam(f'sisyphos.refine.{key}')
+        if val:
+          OV.SetParam(f'snum.masks.{snum_key}', val)
+      self.log_sth(f"Applied refinement settings from SISYPHOS: {self.prg} ({self.method})")
 
     def configure_ORCA(self) -> None:
       olx.xf.EndUpdate()
@@ -313,7 +350,12 @@ class FAPJob:                                   # one FAPjob manages the refinem
       R1_all = 0.0
       R1_gt = 0.0
       wR2 = 0.0
-      
+      if self.shelx:
+        msg = "ESD extraction is currently not available for SHELXL refinement, skipping bond lengths and ESDs."
+        print(msg)
+        self.log_sth(msg)
+        return dist_stats, dist_errs, "n/a", "n/a", "n/a", "n/a"
+
      # This Block will extract the bondlengths from all bonded atoms
       use_tsc = self.nos2
       table_name = ""      
@@ -389,14 +431,221 @@ class FAPJob:                                   # one FAPjob manages the refinem
           dist_errs[bond] = math.sqrt(var)
       return dist_stats,dist_errs,R1_all,R1_gt,wR2,curr_form
 
-    def parse_cif(self, loc: str) -> dict:
+    from typing import Tuple, Dict, Any
+
+    def parse_cif(self, loc: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Parses the cif given by loc and returns a dictionary of parsed information
+
+        Args:
+            loc (str): Path to the .cif file to be analyzed
+
+        Returns:
+            (dict, dict): (Result dictionary from cif, dispersion dictionary)
+        """
+        self.log_sth(f"Starting CIF parsing: {loc}")
+
+        dat_names = [
+            "mu",
+            "wavelength",
+            "F000",
+            "tot_reflIns",
+            "goof",
+            "R_all",
+            "R1",
+            "wR2",
+            "last Shift",
+        ]
+
+        corr_filts = [
+            "_exptl_absorpt_coefficient_mu ",  # note the trailing space
+            "_diffrn_radiation_wavelength",
+            "_exptl_crystal_F_000",
+            "_diffrn_reflns_number",
+            "_refine_ls_goodness_of_fit_ref",
+            "_refine_ls_R_factor_all",
+            "_refine_ls_R_factor_gt",
+            "_refine_ls_wR_factor_ref",
+            "REM Shift_max",
+        ]
+
+        out_dict: Dict[str, Any] = {}
+        disp_dict: Dict[str, Any] = {}
+
+        # ------------------------------------------------------------------
+        # 1) Basic scalar/refinement values
+        # ------------------------------------------------------------------
+        try:
+            with open(loc, "r") as incif:
+                lines = incif.readlines()
+
+            for idx, line in enumerate(lines):
+                for i, filter_str in enumerate(corr_filts):
+                    if filter_str in line:
+                        self.log_sth(
+                            f"Found tag '{filter_str}' (target key '{dat_names[i]}') on line {idx + 1}"
+                        )
+                        parts = line.split()
+                        # try to get value from the same line
+                        if len(parts) > 1:
+                            try:
+                                value = float(parts[-1])
+                                out_dict[dat_names[i]] = value
+                            except (ValueError, IndexError) as e:
+                                self.log_sth(
+                                    f"Failed to parse value from '{filter_str}' on the same line "
+                                    f"(line {idx + 1}): '{line.strip()}', error={e}. "
+                                    "Setting value to NaN."
+                                )
+                                out_dict[dat_names[i]] = math.nan
+                        else:
+                            # if value is on the next line
+                            if idx + 1 < len(lines):
+                                try:
+                                    value = float(lines[idx + 1].strip())
+                                    out_dict[dat_names[i]] = value
+                                except (ValueError, IndexError) as e:
+                                    self.log_sth(
+                                        f"Failed to parse value from next line after '{filter_str}' "
+                                        f"(lines {idx + 1}/{idx + 2}): error={e}. Setting value to NaN."
+                                    )
+                                    out_dict[dat_names[i]] = math.nan
+
+            # ensure every dat_name is present; if not found → NaN
+            for name in dat_names:
+                if name not in out_dict:
+                    self.log_sth(
+                        f"No value found for '{name}' (no matching tag or parse failure). "
+                        "Setting value to NaN."
+                    )
+                    out_dict[name] = math.nan
+
+            self.log_sth("Basic CIF extraction successful :)")
+
+        except Exception as e:
+            self.log_sth(f"Basic CIF extraction failed with exception: {e}")
+
+        # ------------------------------------------------------------------
+        # 2) Extended info: U_eq values & dispersion
+        # ------------------------------------------------------------------
+        try:
+            # --- U_eq values ---
+            with open(loc, "r") as incif:
+                switch2 = False
+                line_no = 0
+
+                for line in incif:
+                    line_no += 1
+                    if line.startswith("  _atom_site_refinement_flags_occupancy"):
+                        switch2 = True
+                        self.log_sth(
+                            f"Found atom refinement block (occupancy flags) at line {line_no}"
+                        )
+                        continue
+
+                    if switch2:
+                        # end of block on empty line
+                        if not line.strip():
+                            switch2 = False
+                            continue
+
+                        lin = line.split()
+                        if len(lin) < 7:
+                            self.log_sth(
+                                f"Skipping malformed atom line {line_no} in refinement block: "
+                                f"'{line.strip()}'"
+                            )
+                            continue
+
+                        atom = lin[1]
+                        ueq_token = lin[6]
+
+                        # handle values with esd 'value(esd)'
+                        if "(" in ueq_token:
+                            ueq_main, ueq_esd = ueq_token.split("(", 1)
+                            ueq_esd = ueq_esd.rstrip(")")
+                        else:
+                            ueq_main, ueq_esd = ueq_token, None
+
+                        # parse main U_eq value
+                        try:
+                            ueq_val = float(ueq_main)
+                        except ValueError as e:
+                            self.log_sth(
+                                f"Failed to parse U_eq for atom '{atom}' at line {line_no}: "
+                                f"token='{ueq_token}', error={e}. Setting U_eq to NaN."
+                            )
+                            ueq_val = math.nan
+
+                        # parse esd if present
+                        if ueq_esd is not None:
+                            try:
+                                ueq_esd_val = int(ueq_esd)
+                            except ValueError as e:
+                                self.log_sth(
+                                    f"Failed to parse U_eq esd for atom '{atom}' at line {line_no}: "
+                                    f"token='{ueq_token}', error={e}. Setting esd to NaN."
+                                )
+                                ueq_esd_val = math.nan
+                        else:
+                            ueq_esd_val = math.nan
+
+                        out_dict[f"{atom}_ueq"] = (ueq_val, ueq_esd_val)
+
+            # --- Dispersion data ---
+            with open(loc, "r") as incif:
+                if self.disp:
+                    switch3 = False
+                    line_no = 0
+                    for line in incif:
+                        line_no += 1
+
+                        # when we are inside dispersion block and see blank line, close block
+                        if switch3 and not line.strip():
+                            switch3 = False
+                            continue
+
+                        if switch3:
+                            adr = line.split()
+                            if len(adr) < 3:
+                                self.log_sth(
+                                    f"Skipping malformed dispersion line {line_no}: "
+                                    f"'{line.strip()}'"
+                                )
+                                continue
+                            disp_dict[adr[0]] = (adr[1], adr[2])
+
+                        if line.startswith("  _atom_site_dispersion_imag"):
+                            switch3 = True
+                            self.log_sth(
+                                f"Found atom dispersion block (_atom_site_dispersion_imag) "
+                                f"at line {line_no}"
+                            )
+
+            self.log_sth("Extended CIF extraction successful :)")
+
+        except Exception as e:
+            # here 'line' might not be defined, so don't refer to it directly
+            self.log_sth(
+                f"Extended CIF extraction failed for '{loc}' with exception: {e}. "
+                "Returning whatever could be parsed so far."
+            )
+
+        self.log_sth(f"Final parsed scalar values: {out_dict}")
+        if disp_dict:
+            self.log_sth(f"Final parsed dispersion entries: {len(disp_dict)} records")
+        else:
+            self.log_sth("No dispersion data parsed (either not present or self.disp=False)")
+
+        return out_dict, disp_dict
+
+    def parse_cif2(self, loc: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
       """Parses the cif given by loc and returns a dictionary of parsed information
 
       Args:
           loc (str): Path to the .cif file to be analyzed
 
       Returns:
-          dict: Result dictionary from cif
+          (dict, dict): (Result dictionary from cif, dispersion dictionary)
       """
       print("loc", loc)
       dat_names = ["mu", 
@@ -409,28 +658,45 @@ class FAPJob:                                   # one FAPjob manages the refinem
         "wR2", 
         "last Shift"]
 
-      corr_filts = ["exptl_absorpt_coefficient_mu", 
-                    "diffrn_radiation_wavelength", 
-                    "exptl_crystal_F_000",
-                    "diffrn_reflns_number",
-                    "refine_ls_goodness_of_fit_ref",
-                    "refine_ls_R_factor_all",
-                    "refine_ls_R_factor_gt",
-                    "refine_ls_wR_factor_ref",
-                    "REM Shift_max"]
-      out = {}
-      disp_dict = {}
+      corr_filts = [
+        "_exptl_absorpt_coefficient_mu ",  
+        "_diffrn_radiation_wavelength",
+        "_exptl_crystal_F_000",
+        "_diffrn_reflns_number",
+        "_refine_ls_goodness_of_fit_ref",
+        "_refine_ls_R_factor_all",
+        "_refine_ls_R_factor_gt",
+        "_refine_ls_wR_factor_ref",
+        "REM Shift_max",
+    ]
+      out_dict: Dict[str, Any] = {}
+      disp_dict: Dict[str, Any] = {}
       try:
         with open(loc, "r") as incif:
-            for line in incif:
-                for i,filter in enumerate(corr_filts):
-                    if filter in line:
-                        out[f"{dat_names[i]}"] = float(line.split()[-1])
+            lines = incif.readlines()
+            for idx, line in enumerate(lines):
+                for i, filter_str in enumerate(corr_filts):
+                    if filter_str in line:
+                        parts = line.split()
+                        if len(parts) > 1:
+                            try:
+                                value = float(parts[-1])
+                                out_dict[f"{dat_names[i]}"] = value
+                            except (ValueError, IndexError) as e:
+                                self.log_sth(f"Failed to parse value from {filter_str}: line='{line.strip()}', error={e}")
+                        else:
+                            if idx + 1 < len(lines):
+                                try:
+                                    value = float(lines[idx + 1].strip())
+                                    out_dict[f"{dat_names[i]}"] = value
+                                except (ValueError, IndexError) as e:
+                                    self.log_sth(f"Failed to parse value from next line after {filter_str}: error={e}")
         self.log_sth("Basic cif extraction succesfull :)")
-      except:
-        self.log_sth("Basic cif extraction failed!")
+      except Exception as e:
+        self.log_sth(f"Basic cif extraction failed with exception: {e}")
       try:
         with open(loc, "r") as incif:
+          print("Final outdict",out_dict)
           switch2 = False
           for line in incif:
             if line.startswith("  _atom_site_refinement_flags_occupancy"):
@@ -444,7 +710,7 @@ class FAPJob:                                   # one FAPjob manages the refinem
                 atom = lin[1]
                 ueq = lin[6].split("(")[0]
                 ueq_delta = lin[6].split("(")[1][:-1]
-                out[f"{atom}_ueq"] = (float(ueq), int(ueq_delta))
+                out_dict[f"{atom}_ueq"] = (float(ueq), int(ueq_delta))
         with open(loc, "r") as incif:
           if self.disp:
             switch3 = False
@@ -462,7 +728,9 @@ class FAPJob:                                   # one FAPjob manages the refinem
         self.log_sth(f"Failed at line {line}")
         self.log_sth(str(e))
         self.log_sth("Extended cif extraction failed!")
-      return out, disp_dict
+      return out_dict, disp_dict
+    
+    
 
     def get_elements(self) -> list:
       return [
@@ -781,6 +1049,27 @@ class SISYPHOS(PT):
     OV.registerFunction(self.setSolutionPath,True,"SISYPHOS")
     OV.registerFunction(self.setBenchmarkFile,True,"SISYPHOS")
     OV.registerFunction(self.setGrow,True,"SISYPHOS")
+    OV.registerFunction(self.setRefineProgram,True,"SISYPHOS")
+    OV.registerFunction(self.loadRefineSettings,True,"SISYPHOS")
+
+  def setRefineProgram(self, prg) -> None:
+    """Set the refinement program of the SISYPHOS settings and reset the method to its default."""
+    import olexex
+    OV.SetParam('sisyphos.refine.program', prg)
+    OV.SetParam('sisyphos.refine.method', olexex.sortDefaultMethod(olexex.RPD.programs[prg]))
+    self.save_sisyphos_phil()
+
+  def loadRefineSettings(self) -> None:
+    """Copy the refinement settings of the currently loaded model into the SISYPHOS settings."""
+    OV.SetParam('sisyphos.refine.program', OV.GetParam('snum.refinement.program'))
+    OV.SetParam('sisyphos.refine.method', OV.GetParam('snum.refinement.method'))
+    OV.SetParam('sisyphos.refine.max_peaks', abs(int(OV.GetParam('snum.refinement.manual_q_peak_override') or 0)))
+    OV.SetParam('sisyphos.refine.use_mask', str(OV.GetParam('snum.refinement.use_solvent_mask')).lower() == 'true')
+    OV.SetParam('sisyphos.refine.mask_program', OV.GetParam('snum.refinement.recompute_mask_before_refinement_prg', 'Olex2'))
+    OV.SetParam('sisyphos.refine.solvent_radius', str(OV.GetParam('snum.masks.solvent_radius')))
+    OV.SetParam('sisyphos.refine.truncation_radius', str(OV.GetParam('snum.masks.shrink_truncation_radius')))
+    self.save_sisyphos_phil()
+    OV.UpdateHtml()
 
   def setBenchmarkFile(self, g_path = None) -> None:
     """Set the benchmark file path.
@@ -1244,7 +1533,7 @@ class SISYPHOS(PT):
                   "cluster_radius", "DIIS",
                   "cluster_grow", "ORCA_SCF_Conv",
                   "ORCA_SCF_Strategy", "ORCA_Solvation",
-                  "pySCF_Damping", "ORCA_DAMP"]
+                  "pySCF_Damping", "ORCA_DAMP","basis_adv","basis_adv_string"]
     for param in nos_params:
       self.nos2_dict[param] = OV.GetParam(f"snum.NoSpherA2.{param}")
 

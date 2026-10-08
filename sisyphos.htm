@@ -137,7 +137,7 @@ $-
 <!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
 
 <!-- #include tool-row-help gui/blocks/tool-row-help.htm;name=Modes; help_ext=Modes;1; -->
-<td ALIGN='left' width='21%'>
+<td ALIGN='left' width='20%' style="vertical-align: middle;">
     <b>Mode options</b>
     <br>
 </td>
@@ -179,6 +179,16 @@ $-
     )
     $-
 </td>
+
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+<!-- #include tool-row-help gui/blocks/tool-row-help.htm;name=Modes; help_ext=Modes;1; -->
+<td ALIGN='left' width='20%' style="vertical-align: middle;">
+    <b>Refine/Search options</b>
+    <br>
+</td>
+
+
 <td width='2%' align="left">
     $+
     html.Snippet("gui/snippets/input-checkbox-td",
@@ -200,11 +210,135 @@ $-
     "oncheck=spy.SetParam('sisyphos.struct_only','True')>>html.Update()",
     "bgcolor=GetVar(HtmlTableRowBgColour)",
     "onuncheck=spy.SetParam('sisyphos.struct_only','False')>>html.Update()"
+        )
+    $-
+</td>
+
+<td width='2%' align="left">
+    $+
+        html.Snippet("gui/snippets/input-checkbox-td",
+        "name=Growed",
+        "label=Growed",
+        "checked=spy.GetParam('sisyphos.growed')",
+        "oncheck=spy.SetParam('sisyphos.growed','True')>>html.Update()",
+        "bgcolor=GetVar(HtmlTableRowBgColour)",
+        "onuncheck=spy.SetParam('sisyphos.growed','False')>>html.Update()"
+        )
+    $-
+</td>
+
+<td width='2%' align="left">
+    $+
+    html.Snippet("gui/snippets/input-checkbox-td",
+    "name=Use refine settings",
+    "label=SHELX",
+    "checked=spy.GetParam('sisyphos.use_refine_settings')",
+    "oncheck=spy.SetParam('sisyphos.use_refine_settings','True')>>html.Update()",
+    "bgcolor=GetVar(HtmlTableRowBgColour)",
+    "onuncheck=spy.SetParam('sisyphos.use_refine_settings','False')>>html.Update()"
     )
-  $-
+    $-
 </td>
 
 <!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+<!-- #ignoreif not spy.GetParam('sisyphos.use_refine_settings')
+<!-- #include tool-row-help gui/blocks/tool-row-help.htm;name=Refine_settings; help_ext=Refinement-Program;1; -->
+<td width='12%'>
+    <b>Program</b>
+</td>
+<td width='25%'>
+    $+
+    html.Snippet("gui/snippets/input-combo",
+    "name=SIS_REFINE_PROGRAM",
+    "items=spy.get_refinement_programs(snum)",
+    "value=spy.GetParam('sisyphos.refine.program')",
+    "readonly=True",
+    "onchange=spy.SISYPHOS.setRefineProgram(html.GetValue(~name~))>>html.Update()"
+    )
+    $-
+</td>
+<td width='25%'>
+    $+
+    html.Snippet("gui/snippets/input-combo",
+    "name=SIS_REFINE_METHOD",
+    "items=spy.get_refinement_methods(spy.GetParam('sisyphos.refine.program'),snum)",
+    "value=spy.GetParam('sisyphos.refine.method')",
+    "readonly=True",
+    "onchange=spy.SetParam('sisyphos.refine.method',html.GetValue(~name~))"
+    )
+    $-
+</td>
+<td align='right' width='8%'>
+    <b>Peaks</b>
+</td>
+$+
+html.Snippet("gui/snippets/input-spin-td",
+"value=spy.GetParam('sisyphos.refine.max_peaks')",
+"name=SIS_REFINE_MAX_PEAKS",
+"min=0",
+"max=99",
+"onchange=spy.SetParam('sisyphos.refine.max_peaks',html.GetValue('~name~'))",
+)
+$-
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+<!-- #include tool-row-help gui/blocks/tool-row-help.htm;name=Refine_settings_mask; help_ext=Refinement-Masks;1; -->
+$+
+html.Snippet("gui/snippets/input-checkbox-td",
+"name=SIS_REFINE_USE_MASK",
+"label=Use Mask",
+"checked=spy.GetParam('sisyphos.refine.use_mask')",
+"oncheck=spy.SetParam('sisyphos.refine.use_mask','True')>>html.Update()",
+"onuncheck=spy.SetParam('sisyphos.refine.use_mask','False')>>html.Update()",
+"bgcolor=GetVar(HtmlTableRowBgColour)",
+"td1=<td width=16%>"
+)
+$-
+<!-- #ignoreif not spy.GetParam('sisyphos.refine.use_mask')
+$+
+html.Snippet("gui/snippets/input-combo-td",
+"name=SIS_REFINE_MASK_PROGRAM",
+"value=spy.GetParam('sisyphos.refine.mask_program')",
+"items=Olex2;Platon",
+"onchange=spy.SetParam('sisyphos.refine.mask_program',html.GetValue('~name~'))>>html.Update()",
+"bgcolor=GetVar(HtmlTableGroupBgColour)",
+"td1=<td width=20%>"
+)
+$-
+<!-- #ignoreif strcmp(spy.GetParam('sisyphos.refine.mask_program'), 'Platon')
+<td width="11%">solvent r</td>
+<td width="10%">
+    $+
+    html.Snippet("gui/snippets/input-text",
+    "name=SIS_REFINE_SOLVENT_RADIUS",
+    "width=100%",
+    "value=spy.GetParam('sisyphos.refine.solvent_radius')",
+    "onchange=spy.SetParam('sisyphos.refine.solvent_radius',html.GetValue('~name~'))")
+    $-
+</td>
+<td width="11%">truncation</td>
+<td width="10%">
+    $+
+    html.Snippet("gui/snippets/input-text",
+    "name=SIS_REFINE_TRUNCATION_RADIUS",
+    "width=100%",
+    "value=spy.GetParam('sisyphos.refine.truncation_radius')",
+    "onchange=spy.SetParam('sisyphos.refine.truncation_radius',html.GetValue('~name~'))")
+    $-
+</td>
+#ignoreif -->
+#ignoreif -->
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+<!-- #include tool-row-help gui/blocks/tool-row-help.htm;name=Refine_settings_note; help_ext=Refinement-Program;1; -->
+<td ALIGN='left'>
+    <a href="spy.SISYPHOS.loadRefineSettings()">Read settings from the loaded model</a>
+    <br><b>Warning: in SHELX mode ADR, NoSpherA2 and anharmonicity are not modelable;
+    ESD extraction is currently not available.</b>
+</td>
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+#ignoreif -->
 
 <!-- #ignoreif not spy.GetParam('sisyphos.use_nos2')
 <!-- #include h3-refine_NoSpherA2SISYPHOS $GetVar(SISYPHOS_plugin_path)\..\..\NoSpherA2\h3-refine_NoSpherA2-extras.htm;gui\blocks\tool-h3-off.htm;image=h3-Refine_NoSpherA2;onclick=;colspan=1;2; -->

@@ -55,6 +55,9 @@ def parse_cif(loc):
                   switch3 = True
     
     return out, disp_dict
-            
-df1,df2 = parse_cif("./sucrose.cif")
-print(df1,df2)
+
+data = ["MoC6O6_20001.cif", "MoC6O6_20100.cif"]
+
+for dat in data:
+    df1,df2 = parse_cif(dat)
+    print(df1,df2)            
